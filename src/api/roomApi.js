@@ -1,7 +1,9 @@
 import { api } from "./client";
 
-export const createRoom = async () => {
-  return await api.post("create-room").json();
+export const createRoom = async (title) => {
+  return await api.post("create-room", {
+    json: { title },
+  }).json();
 };
 
 export const getRoom = async (roomSlug) => {
