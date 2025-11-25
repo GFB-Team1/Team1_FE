@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { createRoom } from "@/api/roomApi";
 import { useNavigate } from "react-router-dom";
+import bg from "@/assets/background.png"; 
+import { File } from "lucide-react";
 
 export default function HomePage() {
   const [title, setTitle] = useState("");
   const [createdSlug, setCreatedSlug] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const navigate = useNavigate();
 
   async function handleCreateRoom(e) {
     e.preventDefault();
@@ -15,7 +16,7 @@ export default function HomePage() {
 
     try {
       setLoading(true);
-      const data = await createRoom(title); // title 넘겨줌
+      const data = await createRoom(title);
       setCreatedSlug(data.room_slug);
     } finally {
       setLoading(false);
@@ -23,66 +24,80 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 px-4">
-      <div className="bg-white rounded-xl shadow-lg p-8 w-full max-w-md space-y-6">
-        
-        <h1 className="text-2xl font-semibold text-gray-800 text-center">
-          새 방 만들기
-        </h1>
-
-        <form className="space-y-4" onSubmit={handleCreateRoom}>
-          <div className="flex flex-col space-y-1">
-            <label className="text-sm font-medium text-gray-700">
-              방 제목
-            </label>
-            <input
-              type="text"
-              placeholder="예: 11월 팀플 회의"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="
-                px-3 py-2 border border-gray-300 
-                rounded-lg focus:outline-none focus:ring-2 
-                focus:ring-blue-500 transition
-              "
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="
-              w-full py-2 bg-blue-600 text-white 
-              rounded-lg font-semibold 
-              hover:bg-blue-700 transition
-              disabled:opacity-50
-            "
-          >
-            {loading ? "생성 중..." : "방 만들기"}
-          </button>
-        </form>
-
-        {/* 생성된 방 slug 표시 */}
-        {createdSlug && (
-          <div className="mt-4 text-center space-y-2">
-            <p className="text-gray-700">방이 생성되었습니다!</p>
-
-            <p className="font-mono text-blue-600 text-lg">
-              {createdSlug}
-            </p>
-
-            <button
-              onClick={() => navigate(`/room/${createdSlug}`)}
-              className="
-                mt-2 px-4 py-2 bg-green-600 text-white 
-                rounded-lg hover:bg-green-700 transition
-              "
-            >
-              방으로 이동하기
-            </button>
-          </div>
-        )}
+    <div
+  className="min-h-screen w-full flex items-center justify-center bg-cover bg-center"
+  style={{
+    backgroundImage: `url(${bg})`,
+  }}
+>
+  {/* 가장 바깥 박스(Glassmorphism) */}
+  <div
+    className="
+      w-full max-w-xl p-10
+      bg-white/40 backdrop-blur-none
+      rounded-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.15)]
+      border border-white/20
+      space-y-10
+    "
+  >
+    {/* 차상단 박스 */}
+    <div
+      className="
+        p-6 rounded-2xl shadow-md 
+        flex flex-col gap-4
+      "
+      style={{
+        background: "radial-gradient(circle at top left, #84E791, #70C582)"
+      }}
+    >
+      <div className="flex text-white items-center gap-3 text-lg font-semibold">
+        <File /> 문서 제목
       </div>
+
+      <input
+        type="text"
+        placeholder="문서 제목 입력"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        className="
+          px-4 py-3 bg-white rounded-xl text-gray-700
+          focus:ring-2 focus:ring-green-500 outline-none
+          shadow-sm
+        "
+      />
+      {title.length < 1 && (
+        <div className="text-sm text-white/90">
+          문서 제목은 최소 1글자 이상 입력해야 합니다.
+        </div>
+      )}
+      {createdSlug && (
+        <div className="mt-2 text-sm font-medium text-gray-500">
+          생성된 문서 링크:{" "}
+          <span className="break-all underline">
+            {window.location.origin}/room/{createdSlug}
+          </span>
+        </div>
+      )}
     </div>
+
+    {/* 만들기 버튼 */}
+    <div className="flex justify-end">
+      <button
+        type="submit"
+        onClick={handleCreateRoom}
+        disabled={loading || title.length < 1}
+        className="
+          w-40 py-3 rounded-full text-white font-semibold
+          bg-[#43B85D]
+          shadow-[0_4px_12px_rgba(0,0,0,0.15)]
+          hover:bg-[#3aa454] transition
+          disabled:opacity-50
+        "
+      >
+        {loading ? "만들기 중..." : "만들기"}
+      </button>
+    </div>
+  </div>
+</div>
   );
 }

@@ -2,7 +2,7 @@ import { api } from "./client";
 
 export const createRoom = async (title) => {
   return await api.post("create-room", {
-    json: { title },
+    json: { 'title':title },
   }).json();
 };
 

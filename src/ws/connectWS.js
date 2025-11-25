@@ -1,4 +1,4 @@
-import { useAuthStore } from "../stores/auth.store";
+import { useAuthStore } from "@/stores/authStore";
 
 export function connectWS(roomSlug) {
   const token = useAuthStore.getState().token;

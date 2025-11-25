@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { connectWS } from "../ws/connectWS";
-import { useRoomStore } from "../store/roomStore";
+import { useRoomStore } from "@/stores/roomStore";
 
 export function useWebSocket(roomSlug) {
   const setWebSocket = useRoomStore((s) => s.setWebSocket);

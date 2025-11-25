@@ -1,134 +1,184 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import JoinModal from "@/components/modal/JoinModal";
-
-// API
-import { getRoom } from "@/api/roomApi";
-import { joinRoom } from "@/api/authApi";
-
-// Zustand stores
 import { useAuthStore } from "@/stores/authStore";
-import { useRoomStore } from "@/stores/roomStore";
-
-
-// Hooks
-import { useWebSocket } from "../hooks/useWebSocket";
-import { useEditorSync } from "../hooks/useEditorSync";
-
-// Tiptap
-import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-
+import bg from "@/assets/wave-bg.png";
+import * as Y from "yjs";
+import { WebsocketProvider } from "y-websocket";
+import { File, Share2 } from "lucide-react";
+import { getRoom } from "@/api/roomApi";
 
 export default function RoomPage() {
   const { roomSlug } = useParams();
+  const token = useAuthStore((state) => state.token);
 
-  const [needJoin, setNeedJoin] = useState(true); // 로그인(참여) 필요 여부
-  const [roomInfo, setRoomInfo] = useState(null);
+  const [roomTitle, setRoomTitle] = useState("Loading...");
+  const [ydoc] = useState(() => new Y.Doc());
+  const [provider, setProvider] = useState(null);
+  const [ytext, setYText] = useState(null);
+  const [localValue, setLocalValue] = useState("");
+  const [hasLoadedFromDB, setHasLoadedFromDB] = useState(false);
+  const [initialSynced, setInitialSynced] = useState(false);
 
-  const setAuth = useAuthStore((s) => s.setAuth);
-  const token = useAuthStore((s) => s.token);
-
-  const setRoomSlug = useRoomStore((s) => s.setRoomSlug);
-
-  // 1. 방 Slug 저장 (전역으로 두면 WS 연결 로직이 편함)
+  /* --------------------------------------------
+     1) 방 제목 불러오기
+  --------------------------------------------- */
   useEffect(() => {
-    setRoomSlug(roomSlug);
-  }, [roomSlug, setRoomSlug]);
-
-  // 2. 방 정보 GET
-  useEffect(() => {
-    async function fetchRoom() {
+    async function loadRoom() {
       try {
         const data = await getRoom(roomSlug);
-        setRoomInfo(data);
-        console.log("방 정보:", data);
-      } catch (err) {
-        console.error("존재하지 않는 방!");
+        setRoomTitle(data.title);
+      } catch {
+        setRoomTitle("제목 없음");
       }
     }
-    fetchRoom();
+    loadRoom();
   }, [roomSlug]);
 
-  // 3. Tiptap Editor 인스턴스 생성 (token 없어도 editor는 먼저 생성 가능)
-  const editor = useEditor({
-    extensions: [StarterKit],
-    content: "<p>Loading...</p>",
-  });
+  /* --------------------------------------------
+     2) DB에서 문서 불러오기
+  --------------------------------------------- */
+  async function loadContentFromDB() {
+    try {
+      const res = await fetch(`http://localhost:8000/room/${roomSlug}/content`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-  // 4. join-room (닉네임/비번 받았다는 가정)
-  async function handleJoin(nickname, password) {
-    const result = await joinRoom(roomSlug, { nickname, password });
+      if (!res.ok) return;
+      const { content } = await res.json();
 
-    setAuth({
-      token: result.token,
-      nickname: result.nickname,
-    });
+      if (!content) return; // DB 비어있음
 
-    console.log("참여 성공:", result);
+      const binary = atob(content);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-    setNeedJoin(false); // 모달 닫기
+      Y.applyUpdate(ydoc, bytes);
+    } catch (err) {
+      console.error("❌ DB load error:", err);
+    }
   }
 
-  // UI는 없지만 이걸로 테스트:
-  // 1) 페이지 열리자마자 자동 참여시키기 (임시)
+  /* --------------------------------------------
+     3) WebSocket + Yjs 연결
+  --------------------------------------------- */
   useEffect(() => {
-    if (needJoin) {
-      handleJoin("UserA", "1234");
-    }
-  }, [needJoin]);
+    if (!token) return;
 
-  // 5. WebSocket 연결 (token이 있어야 연결됨)
-  useWebSocket(roomSlug);
+    // A 방식: 방 이름을 provider roomName 파라미터에 넣지 않음
+    const wsProvider = new WebsocketProvider(
+      `ws://localhost:1234/${roomSlug}?token=${token}`,
+      "",
+      ydoc
+    );
 
-  // 6. Yjs <-> WS <-> Tiptap 동기화 hook
-  useEditorSync(editor);
+    const text = ydoc.getText("content");
+    setYText(text);
 
+    // WebSocket 상태 출력
+    wsProvider.on("status", (e) => {
+      console.log("WS STATUS:", e.status);
+    });
+
+    // 첫 sync 완료 → DB 자동 불러오기
+    wsProvider.on("sync", async (synced) => {
+      if (synced) {
+        console.log("🔥 SYNCED with server");
+
+        // 1회만 수행
+        if (!hasLoadedFromDB) {
+          setHasLoadedFromDB(true);
+          await loadContentFromDB();
+        }
+        setInitialSynced(true);
+      }
+    });
+
+    // 실시간 editor 변화 적용
+    text.observe(() => {
+      setLocalValue(text.toString());
+    });
+
+    setProvider(wsProvider);
+
+    return () => {
+      wsProvider.destroy();
+      ydoc.destroy();
+    };
+  }, [roomSlug, token, ydoc]);
+
+  /* --------------------------------------------
+     4) Editor 입력 핸들링
+  --------------------------------------------- */
+  const handleChange = (e) => {
+    const value = e.target.value;
+    setLocalValue(value);
+
+    if (!ytext) return;
+
+    ydoc.transact(() => {
+      ytext.delete(0, ytext.length);
+      ytext.insert(0, value);
+    });
+  };
+
+  // /* --------------------------------------------
+  //    5) 로딩 화면
+  // --------------------------------------------- */
+  // if (!initialSynced) {
+  //   return (
+  //     <div className="flex items-center justify-center min-h-screen bg-[#F3FFE8]">
+  //       <div className="text-lg text-gray-700">문서 불러오는 중...</div>
+  //     </div>
+  //   );
+  // }
+
+  /* --------------------------------------------
+     6) 실제 UI
+  --------------------------------------------- */
   return (
-  <div className="min-h-screen bg-gray-50 flex flex-col">
+    
+    <div
+          className="min-h-screen w-full flex items-center justify-center bg-cover bg-center"
+          style={{
+            backgroundImage: `url(${bg})`,
+          }}
+        >
+          
+      <div className="absolute top-5 left-10 z-5 w-[15%] rounded-xl shadow-lg border border-gray-300 bg-white overflow-hidden">
+        {/* Green header bar */}
+        <div className="w-full h-5 bg-[#73C276]"></div>
 
-    {/* 1. 방 제목 헤더 */}
-    <header className="border-b bg-white px-6 py-4 flex items-center justify-between shadow-sm">
-      <div>
-        <h1 className="text-xl font-semibold text-gray-800">
-          {roomInfo ? roomInfo.title : "방 불러오는 중..."}
-        </h1>
-        <p className="text-sm text-gray-500">Room: {roomSlug}</p>
-      </div>
-
-      {/* URL 복사 버튼 */}
-      <button
-        onClick={() => navigator.clipboard.writeText(window.location.href)}
-        className="px-3 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 transition"
-      >
-        URL 복사
-      </button>
-    </header>
-
-    {/* 2. 메인 에디터 영역 */}
-    <main className="flex-1 max-w-4xl w-full mx-auto mt-6 px-4 pb-20">
-      {/* roomInfo 아직 없으면 로딩 UI */}
-      {!roomInfo && (
-        <div className="text-gray-500 text-center mt-20">방 정보를 불러오는 중...</div>
-      )}
-
-      {/* editor 준비 안 됨 */}
-      {!editor && (
-        <div className="mt-20 text-center text-gray-500">에디터 초기화 중...</div>
-      )}
-
-      {/* editor */}
-      {editor && (
-        <div className="bg-white rounded-lg shadow p-6 min-h-[500px]">
-          <EditorContent editor={editor} />
+        {/* Title area */}
+        <div className="px-4 py-2 text-center border-b border-gray-300">
+          <div className="text-xl font-bold">{roomTitle}</div>
         </div>
-      )}
-    </main>
 
-    {/* 3. Join Modal */}
-    {needJoin && (
-      <JoinModal onSubmit={handleJoin} />
-    )}
-  </div>
-);
+        {/* Lined section */}
+        <div className="px-6 py-3 space-y-2">
+          <div className="w-full h-[1px] bg-gray-300"></div>
+          <div className="w-full h-[1px] bg-gray-300"></div>
+          <div className="w-full h-[1px] bg-gray-300"></div>
+          <div className="w-full h-[1px] bg-gray-300"></div>
+          <div className="w-full h-[1px] bg-gray-300"></div>
+          <div className="w-full h-[1px] bg-gray-300"></div>
+          <div className="w-full h-[1px] bg-gray-300"></div>
+        </div>
+      </div>
+      <div className="absolute inset-0 flex items-center justify-center z-10">
+        <div className="w-[85%] h-[75%] bg-white rounded-3xl shadow-xl border border-gray-200 relative">
+          <div className="w-full h-12 bg-[#92e5a1] rounded-t-3xl border-b border-green-200"></div>
+          <Share2
+  size={28}
+  className="absolute top-3 right-4 text-black cursor-pointer z-20 hover:text-black/50"
+  onClick={() => navigator.clipboard.writeText(window.location.href)}
+/>
+          <textarea
+            value={localValue}
+            onChange={handleChange}h
+            className="w-full h-[calc(100%-3rem)] text-lg p-6 mt-3 bg-transparent resize-none outline-none"
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
